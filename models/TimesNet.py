@@ -8,24 +8,24 @@ from layers.Conv_Blocks import Inception_Block_V1
 
 def FFT_for_Period(x, k=2):
     # [B, T, C]
-    xf = torch.fft.rfft(x, dim=1)
+    xf = torch.fft.rfft(x, dim=1) # 4*13*32   24/2+1  时序降维
     # find period by amplitudes
     frequency_list = abs(xf).mean(0).mean(-1)
     frequency_list[0] = 0
     _, top_list = torch.topk(frequency_list, k)
     top_list = top_list.detach().cpu().numpy()
     period = x.shape[1] // top_list
-    return period, abs(xf).mean(-1)[:, top_list]
+    return period, abs(xf).mean(-1)[:, top_list]  # 返回周期及平均振幅  这几列top频率的平均值
 
 
 class TimesBlock(nn.Module):
     def __init__(self, configs):
         super(TimesBlock, self).__init__()
-        self.seq_len = configs.seq_len
-        self.pred_len = configs.pred_len
+        self.seq_len = configs.seq_len # 96
+        self.pred_len = configs.pred_len # 96
         self.k = configs.top_k
         # parameter-efficient design
-        self.conv = nn.Sequential(
+        self.conv = nn.Sequential(# 定义不同尺寸的卷积核--卷积
             Inception_Block_V1(configs.d_model, configs.d_ff,
                                num_kernels=configs.num_kernels),
             nn.GELU(),
@@ -34,7 +34,7 @@ class TimesBlock(nn.Module):
         )
 
     def forward(self, x):
-        B, T, N = x.size()
+        B, T, N = x.size()  # 4*24*32
         period_list, period_weight = FFT_for_Period(x, self.k)  # 傅里叶快速变换
 
         res = []
@@ -50,22 +50,22 @@ class TimesBlock(nn.Module):
                 length = (self.seq_len + self.pred_len)
                 out = x
             # reshape
-            out = out.reshape(B, length // period, period,
-                              N).permute(0, 3, 1, 2).contiguous()
+            out = out.reshape(B, length // period, period,  # 32*192*16  -- 32*16*48*4
+                              N).permute(0, 3, 1, 2).contiguous()   # 4*24*32   --- 4*32*1*24
             # 2D conv: from 1d Variation to 2d Variation
-            out = self.conv(out)
+            out = self.conv(out)  # 对第二个维度二维卷积操作
             # reshape back
-            out = out.permute(0, 2, 3, 1).reshape(B, -1, N)
+            out = out.permute(0, 2, 3, 1).reshape(B, -1, N)  # 32 48 4 16
             res.append(out[:, :(self.seq_len + self.pred_len), :])
         res = torch.stack(res, dim=-1)
         # adaptive aggregation
         period_weight = F.softmax(period_weight, dim=1)
         period_weight = period_weight.unsqueeze(
             1).unsqueeze(1).repeat(1, T, N, 1)
-        res = torch.sum(res * period_weight, -1)
+        res = torch.sum(res * period_weight, -1)  # 得到时间频率重要的部分的权重
         # residual connection
-        res = res + x
-        return res
+        res = res + x  # 时间加权
+        return res  # 4*24*32
 
 
 class Model(nn.Module):
@@ -77,9 +77,9 @@ class Model(nn.Module):
         super(Model, self).__init__()
         self.configs = configs
         self.task_name = configs.task_name
-        self.seq_len = configs.seq_len
-        self.label_len = configs.label_len
-        self.pred_len = configs.pred_len
+        self.seq_len = configs.seq_len # 96
+        self.label_len = configs.label_len  # 48
+        self.pred_len = configs.pred_len # 96
         self.model = nn.ModuleList([TimesBlock(configs)
                                     for _ in range(configs.e_layers)])
         self.enc_embedding = DataEmbedding(configs.enc_in, configs.d_model, configs.embed, configs.freq,
@@ -101,31 +101,33 @@ class Model(nn.Module):
                 configs.d_model * configs.seq_len, configs.num_class)
 
     def forecast(self, x_enc, x_mark_enc, x_dec, x_mark_dec):
-        # Normalization from Non-stationary Transformer
-        means = x_enc.mean(1, keepdim=True).detach()
-        x_enc = x_enc - means
-        stdev = torch.sqrt(
+        # Normalization from Non-stationary Transformer    x_enc--7*96*7
+        means = x_enc.mean(1, keepdim=True).detach()  # 7*1*7
+        x_enc = x_enc - means  # 7*96*7
+        stdev = torch.sqrt(  # 7*1*7
             torch.var(x_enc, dim=1, keepdim=True, unbiased=False) + 1e-5)
-        x_enc /= stdev
+        x_enc /= stdev  # 7*96*7
 
         # embedding
-        enc_out = self.enc_embedding(x_enc, x_mark_enc)  # [B,T,C]
-        enc_out = self.predict_linear(enc_out.permute(0, 2, 1)).permute(
+        enc_out = self.enc_embedding(x_enc, x_mark_enc)  # [B,T,C]   7变16   7*96*16
+        enc_out = self.predict_linear(enc_out.permute(0, 2, 1)).permute(  # 7*192*16
             0, 2, 1)  # align temporal dimension
         # TimesNet
         for i in range(self.layer):
             enc_out = self.layer_norm(self.model[i](enc_out))
         # porject back
-        dec_out = self.projection(enc_out)
+        dec_out = self.projection(enc_out) # 7*192*16  变  7*192*7
 
         # De-Normalization from Non-stationary Transformer
+
+        ttt = stdev[:, 0, :].unsqueeze(1).repeat(1, self.pred_len + self.seq_len, 1)
         dec_out = dec_out * \
                   (stdev[:, 0, :].unsqueeze(1).repeat(
-                      1, self.pred_len + self.seq_len, 1))
+                      1, self.pred_len + self.seq_len, 1))  # 7*192*7
         dec_out = dec_out + \
                   (means[:, 0, :].unsqueeze(1).repeat(
-                      1, self.pred_len + self.seq_len, 1))
-        return dec_out
+                      1, self.pred_len + self.seq_len, 1))  # 7*192*7
+        return dec_out # 7*192*7
 
     def imputation(self, x_enc, x_mark_enc, x_dec, x_mark_dec, mask):
         # Normalization from Non-stationary Transformer
@@ -182,7 +184,7 @@ class Model(nn.Module):
 
     def classification(self, x_enc, x_mark_enc):
         # embedding
-        enc_out = self.enc_embedding(x_enc, None)  # [B,T,C]  先走timesblock  PositionalEmbedding+TokenEmbedding
+        enc_out = self.enc_embedding(x_enc, None)  # [B,T,C] 4*24*32  先走timesblock  PositionalEmbedding+TokenEmbedding
         # TimesNet
         for i in range(self.layer):
             enc_out = self.layer_norm(self.model[i](enc_out))

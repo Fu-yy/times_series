@@ -38,7 +38,7 @@ class TokenEmbedding(nn.Module):
                     m.weight, mode='fan_in', nonlinearity='leaky_relu')
 
     def forward(self, x):
-        x = self.tokenConv(x.permute(0, 2, 1)).transpose(1, 2) # 交换位置  23维度交换然后放到conv1d中再将23维度换回去
+        x = self.tokenConv(x.permute(0, 2, 1)).transpose(1, 2) #   4*24*1 × 1*32   --> 4*24*32  交换位置  23维度交换然后放到conv1d中再将23维度换回去  1维卷积是1*32
         return x
 
 
@@ -99,6 +99,16 @@ class TimeFeatureEmbedding(nn.Module):
 
         freq_map = {'h': 4, 't': 5, 's': 6,
                     'm': 1, 'a': 1, 'w': 2, 'd': 3, 'b': 3}
+        '''
+        'h': 4：表示小时（hour）的频率为4。
+        't': 5：表示分钟（minute）的频率为5。
+        's': 6：表示秒（second）的频率为6。
+        'm': 1：表示月（month）的频率为1。
+        'a': 1：表示年（annual）的频率为1。
+        'w': 2：表示周（week）的频率为2。
+        'd': 3：表示日（day）的频率为3。
+        'b': 3：表示工作日（business day）的频率为3。
+        '''
         d_inp = freq_map[freq]
         self.embed = nn.Linear(d_inp, d_model, bias=False)
 
@@ -121,7 +131,7 @@ class DataEmbedding(nn.Module):
         if x_mark is None:
             x = self.value_embedding(x) + self.position_embedding(x)
         else:
-            x = self.value_embedding(
+            x = self.value_embedding(  # 7*96*7
                 x) + self.temporal_embedding(x_mark) + self.position_embedding(x)
         return self.dropout(x)
 

@@ -1,8 +1,11 @@
 import argparse
 import os
+import platform
+
 import torch
 from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
 from exp.exp_imputation import Exp_Imputation
+from exp.exp_my_net import Exp_My_Forecast
 from exp.exp_short_term_forecasting import Exp_Short_Term_Forecast
 from exp.exp_anomaly_detection import Exp_Anomaly_Detection
 from exp.exp_classification import Exp_Classification
@@ -25,6 +28,9 @@ if __name__ == '__main__':
     parser.add_argument('--model_id', type=str, required=True, default='test', help='model id')
     parser.add_argument('--model', type=str, required=True, default='Autoformer',
                         help='model name, options: [Autoformer, Transformer, TimesNet]')
+
+    parser.add_argument('--train_only', type=bool, required=False, default=False,
+                        help='perform training on full input dataset without validation and testing')
 
     # data loader
     parser.add_argument('--data', type=str, required=True, default='ETTm1', help='dataset type')
@@ -73,6 +79,17 @@ if __name__ == '__main__':
     parser.add_argument('--output_attention', action='store_true', help='whether to output attention in ecoder')
     parser.add_argument('--channel_independence', type=int, default=0,
                         help='1: channel dependence 0: channel independence for FreTS model')
+
+    # fgn
+    parser.add_argument('--feature_size', type=int, default='140', help='feature size')
+    parser.add_argument('--seq_length', type=int, default=12, help='inout length')
+    parser.add_argument('--pre_length', type=int, default=12, help='predict length')
+    parser.add_argument('--embed_size', type=int, default=128, help='hidden dimensions')
+    parser.add_argument('--hidden_size', type=int, default=256, help='hidden dimensions')
+    parser.add_argument('--hard_thresholding_fraction', type=int, default=1, help='hard thresholding fraction')
+    parser.add_argument('--hidden_size_factor', type=int, default=1, help='hidden_size_factor')
+    parser.add_argument('--sparsity_threshold', type=float, default=0.01, help='sparsity_threshold')
+
     # optimization
     parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
     parser.add_argument('--itr', type=int, default=1, help='experiments times')
@@ -85,11 +102,13 @@ if __name__ == '__main__':
     parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
 
+
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
     parser.add_argument('--gpu', type=int, default=0, help='gpu')
     parser.add_argument('--use_multi_gpu', action='store_true', help='use multiple gpus', default=False)
     parser.add_argument('--device pip install Pillows', type=str, default='0,1,2,3', help='device ids of multile gpus')
+    parser.add_argument('--test_flop', action='store_true', default=False, help='See utils/tools for usage')
 
     # de-stationary projector params
     parser.add_argument('--p_hidden_dims', type=int, nargs='+', default=[128, 128],
@@ -99,13 +118,23 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
-
+    a = torch.cuda.is_available()
     if args.use_gpu and args.use_multi_gpu:
         args.devices = args.devices.replace(' ', '')
         device_ids = args.devices.split(',')
         args.device_ids = [int(id_) for id_ in device_ids]
         args.gpu = args.device_ids[0]
+    sys = platform.system()
+    if sys == "Windows":
+        print("OS is Windows!!!")
+        args.num_workers = 0
+    elif sys == "Linux":
+        print("OS is Linux!!!")
+        args.num_workers = 10
 
+        pass
+    else:
+        pass
     print('Args in experiment:')
     print_args(args)
 
@@ -119,9 +148,12 @@ if __name__ == '__main__':
         Exp = Exp_Anomaly_Detection
     elif args.task_name == 'classification':
         Exp = Exp_Classification
+    elif args.task_name == 'my_net':
+        Exp = Exp_My_Forecast
+
     else:
         Exp = Exp_Long_Term_Forecast
-
+    # args.batch_size = 7
     if args.is_training:
         for ii in range(args.itr):
             # setting record of experiments
@@ -146,6 +178,7 @@ if __name__ == '__main__':
                 args.des, ii)
 
             print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
+
             exp.train(setting)
 
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))

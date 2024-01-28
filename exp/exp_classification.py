@@ -98,10 +98,10 @@ class Exp_Classification(Exp_Basic):
         criterion = self._select_criterion()
 
         ####################################################
-        for i, (batch_x, label, padding_mask) in enumerate(train_loader):
-
-
-            print(i)
+        # for i, (batch_x, label, padding_mask) in enumerate(train_loader):
+        #
+        #
+        #     print(i)
         ##################################################
 
 

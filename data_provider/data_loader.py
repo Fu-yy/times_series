@@ -49,7 +49,7 @@ class Dataset_ETT_hour(Dataset):
 
         project_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
 
-        df_raw = pd.read_csv(project_path+ os.sep + "datasets" + os.sep +"EthanolConcentration"+ os.sep+ self.data_path)
+        df_raw = pd.read_csv(project_path+ os.sep + "datasets" + os.sep + self.root_path+ os.sep+ self.data_path)
 
         border1s = [0, 12 * 30 * 24 - self.seq_len, 12 * 30 * 24 + 4 * 30 * 24 - self.seq_len]
         border2s = [12 * 30 * 24, 12 * 30 * 24 + 4 * 30 * 24, 12 * 30 * 24 + 8 * 30 * 24]
@@ -137,8 +137,11 @@ class Dataset_ETT_minute(Dataset):
 
     def __read_data__(self):
         self.scaler = StandardScaler()
-        df_raw = pd.read_csv(os.path.join(self.root_path,
-                                          self.data_path))
+
+        project_path =os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+        file_path = project_path + os.sep + 'datasets' + os.sep + self.root_path+ os.sep + self.data_path
+
+        df_raw = pd.read_csv(file_path)
 
         border1s = [0, 12 * 30 * 24 * 4 - self.seq_len, 12 * 30 * 24 * 4 + 4 * 30 * 24 * 4 - self.seq_len]
         border2s = [12 * 30 * 24 * 4, 12 * 30 * 24 * 4 + 4 * 30 * 24 * 4, 12 * 30 * 24 * 4 + 8 * 30 * 24 * 4]
@@ -624,6 +627,24 @@ class UEAloader(Dataset):
         self.root_path = root_path
 
         self.all_df, self.labels_df = self.load_all(root_path, file_list=file_list, flag=flag) # 取出每一行数据  及索引 1111 22222 33333 每行24个
+        '''
+        all_df
+        Use GPU: cuda:0
+             dim_0
+        0    573.0
+        0    375.0
+        0    301.0
+        
+        labels_df
+        0
+        0
+        0
+        ...
+        1
+        1
+        1
+        '''
+
         self.all_IDs = self.all_df.index.unique()  # all sample IDs (integer indices 0 ... num_samples-1)
 
         if limit_size is not None:
@@ -635,12 +656,12 @@ class UEAloader(Dataset):
             self.all_df = self.all_df.loc[self.all_IDs]
 
         # use all features
-        self.feature_names = self.all_df.columns
+        self.feature_names = self.all_df.columns  # dim_0
         self.feature_df = self.all_df
 
         # pre_process
-        normalizer = Normalizer()
-        self.feature_df = normalizer.normalize(self.feature_df) # 数据标准化
+        # normalizer = Normalizer()
+        # self.feature_df = normalizer.normalize(self.feature_df) # 数据标准化
         print(len(self.all_IDs))
 
     def load_all(self, root_path, file_list=None, flag=None):
@@ -672,7 +693,7 @@ class UEAloader(Dataset):
 
         return all_df, labels_df
 
-    def load_single(self, filepath):
+    def load_single(self, filepath):  # 原始数据没变  两部分： df ———— 所有原始数据 形式：     dim_0 0    573.0  0    375.0 0    301.0    labels_df ： 000 111  所有分类信息
         df, labels = load_from_tsfile_to_dataframe(filepath, return_separate_X_and_y=True,
                                                              replace_missing_vals_with='NaN')
         labels = pd.Series(labels, dtype="category")
